@@ -11,8 +11,19 @@ var server = net.createServer(function (clientSocket) {
 
     var haveSeenEndOfHeader = false;
     var header = "";
+    // Should create server socket here to avoid delay on data
+    var serverSock = net.Socket();
+    function closeSockets(s1, s2){
+      s1.end();
+      s2.end();
+    }
+    clientSocket.on('close', function(){
+      closeSockets(clientSocket, serverSocket);
+    });
 
-    clientSocket.on('data', function (data) {
+
+    // do we need to pass as an argument
+    clientSocket.on('data', function (data, serverSock) {
         if (!haveSeenEndOfHeader) {
             var dataString = data.toString('ascii');
             header.concat(dataString);
@@ -57,11 +68,21 @@ var server = net.createServer(function (clientSocket) {
                 }else{ port = host[1];}
                 
                 function initiateConnection() {
-                  // Create Socket to serverAddr and port
-                  // Connect
-                  // Set appropriate callbacks based upon request type (CONNECT
-                  // vs GET)
-                  // Send modified header
+                  // Assign on msg based upon connection type Connect vs Get
+                  // each callback should have a static definition (?)
+                  serverSock.on('data', function(data) {
+
+                  });
+                  // Connect to Host/Port
+                  serverSock.connect(address.port, address.host, function(err){
+                    // callback
+                    if (err) {
+                      // send 502 bad gateway
+                      // close connection
+                    }
+                    // send HTTP 200 to client
+                    // forward modified header
+                  });
                 }
                 dns.lookup(hostName, (err, address, family) => {
                   if (err) {
@@ -72,10 +93,7 @@ var server = net.createServer(function (clientSocket) {
                   serverAddr = address;
                   initiateConnection();
                   //create socket to server and connect
-                }
-
-
-                //TODO: look at method
+                });
             }
         }
 
@@ -83,6 +101,11 @@ var server = net.createServer(function (clientSocket) {
         //resolve name
         //forward data
         //forward responses
+        // if haveSeenHeader:
+        // forward data until one end closes connection
+        // how to close serverSock if clientSocket initiates close?
+        // redefine "on close" within the first on data
+        // potential cyclic close calls
     });
 
 });
