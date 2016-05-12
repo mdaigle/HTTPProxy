@@ -12,13 +12,26 @@ var server = net.createServer(function (clientSocket) {
     var haveSeenEndOfHeader = false;
     var header = "";
     // Should create server socket here to avoid delay on data
-    var serverSock = net.Socket();
-    function closeSockets(s1, s2){
-      s1.end();
-      s2.end();
-    }
-    clientSocket.on('close', function(){
-      closeSockets(clientSocket, serverSocket);
+    var serverSocket = net.Socket();
+
+    clientSocket.on('end', function() {
+      serverSocket.end();
+    });
+    serverSocket.on('end', function() {
+      clientSocket.end();
+    });
+    serverSocket.on('error', function(err) {
+      // close connection
+      serverSocket.end();
+      clientSocket.end();
+    });
+    clientSocket.on('error', function(err) {
+      clientSocket.end();
+      serverSocket.end();
+    });
+
+    serverSocket.on('data', function(data) {
+      clientSocket.write(data);
     });
 
 
@@ -30,14 +43,26 @@ var server = net.createServer(function (clientSocket) {
 
             if (header.includes('\r\n\r\n')) {
                 haveSeenEndOfHeader = true;
+                // this is the split between header and appended data
                 var headerish = header.split('\r\n\r\n');
+                // these are the lines of the actual header
                 var lines = headerish[0].split('\r\n');
 
                 //TODO: make sure header is valid
-                var requestLine = lines.shift().trim().split('\w');
-                if (requestLine.length != 3) { 
+                var requestLine = lines.shift().trim().split(/\s+/).toLowerCase();
+                if (requestLine.length == 3) { 
                   // invalid header
-                  // discard
+                  if (requestLine[2] != "HTTP/1.1"){
+                    // invalid
+                    clientSocket.end();
+                    return
+                  }
+                  if (requestLine[0] != "connect" && requestLine[0] != "get"){
+                    client.Socket.end();
+                    return;
+                  }
+                } else {
+                  clientSocket.end();
                   return;
                 }
                 var options = {};
@@ -51,38 +76,53 @@ var server = net.createServer(function (clientSocket) {
                     if (optionFields == null) { continue; }
                     options[optionFields[0].trim().toLowerCase()] = optionFields[1].trim();
                 }
-                //TODO: start DNS lookup
                 var reqType = requestLine[0];
                 var uri = requestLine[1];
                 // may actually need host
                 var serverAddr;
                 if (!("host" in options)) {
+                  clientSocket.end();
                   return;
                 } 
                 host = options.host.split(':');
                 // Could ipv6 cause there to be multiple : in host?
+                //TODO: check for index out of bounds errors
                 hostName = host[0];
                 if (host.length == 1) {
                   // Double check
                   port = uri.split('.')[1].split(':')[1].split('/')[0];
                 }else{ port = host[1];}
                 
-                function initiateConnection() {
+                function initiateConnection(hostname, port) {
                   // Assign on msg based upon connection type Connect vs Get
                   // each callback should have a static definition (?)
-                  serverSock.on('data', function(data) {
-
-                  });
-                  // Connect to Host/Port
-                  serverSock.connect(address.port, address.host, function(err){
-                    // callback
-                    if (err) {
+                  if (reqType == "connect") {
+                    serverSocket.on("error", function() {
                       // send 502 bad gateway
-                      // close connection
-                    }
-                    // send HTTP 200 to client
-                    // forward modified header
-                  });
+                      //TODO: build message
+                      msg = null;
+                      clientSocket.write(msg, function() {
+                        clientSocket.end();
+                      });
+                    });
+                    serverSocket.on("connect", function() {
+                      serverSocket.on('error', function() {
+                        clientSocket.end();
+                      });
+                      // send 200
+                      //TODO: build message
+                      msg = null;
+                      clientSocket.send(msg);
+                    });
+                  } else if(reqType == "get") {
+                    // forward modified header + data
+                    serverSocket.on("connect", function() {
+                      serverSocket.write(header);
+                    });
+                  }
+                  // Note: Do we downgrade to 1.0 for both GET and CONNECT requests?
+                  // Connect to Host/Port
+                  serverSocket.connect(port, hostname);
                 }
                 dns.lookup(hostName, (err, address, family) => {
                   if (err) {
@@ -91,21 +131,14 @@ var server = net.createServer(function (clientSocket) {
                     return;
                   }
                   serverAddr = address;
-                  initiateConnection();
+                  initiateConnection(serverAddr.hostname, port);
                   //create socket to server and connect
                 });
             }
+        } else {
+          // we have seen the header
+          serverSocket.write(data);
         }
-
-        //parse/modify header
-        //resolve name
-        //forward data
-        //forward responses
-        // if haveSeenHeader:
-        // forward data until one end closes connection
-        // how to close serverSock if clientSocket initiates close?
-        // redefine "on close" within the first on data
-        // potential cyclic close calls
     });
 
 });
