@@ -113,7 +113,6 @@ var server = net.createServer(function (clientSocket) {
                             serverSocket.on('error', function() {
                                 clientSocket.end();
                             });
-                            // send 200
                             var msg = "HTTP/1.1 200 OK\r\n\r\n";
                             clientSocket.write(msg);
                         });
@@ -196,7 +195,7 @@ function determineServerPort(hostFieldComponents, requestURI) {
         }
     }else{
         // Pull port from host field
-        serverPort = host[1];
+        serverPort = hostFieldComponents[1];
     }
     return serverPort;
 }
