@@ -1,8 +1,7 @@
 var net = require('net');
 var dns = require('dns');
+var date = new Date();
 
-//TODO: change keep-alive
-//TODO: downgrade to 1.0
 //TODO: make sure CONNECT works
 
 var args = process.argv.slice(2);
@@ -13,7 +12,6 @@ if (args.length != 1) {
 var clientFacingPort = args[0];
 
 var server = net.createServer(function (clientSocket) {
-
     var haveSeenEndOfHeader = false;
     var header = "";
     // Should create server socket here to avoid delay on data
@@ -48,41 +46,54 @@ var server = net.createServer(function (clientSocket) {
                 haveSeenEndOfHeader = true;
                 var trimmedHeader = header.split('\r\n\r\n');
                 var headerLines = trimmedHeader[0].split('\r\n');
+                var extraData = trimmedHeader[1];
 
                 // Take the first line and split it on white space
                 var requestLineComponents = headerLines.shift().trim().split(/\s+/);
-                if (requestLineComponents.length == 3) {
-                    if (requestLineComponents[2].toLowerCase() != "http/1.1"){
-                        // We only support 1.1
-                        clientSocket.end();
-                        return
-                    }
-                    if (requestLineComponents[0].toLowerCase() != "connect" &&
-                        requestLineComponents[0].toLowerCase() != "get"){
-                        // We only support CONNECT and GET requests.
-                        clientSocket.end();
-                        return;
-                    }
-                } else {
-                    // Malformed request line.
+                if (requestLineComponents.length != 3) {
+                    console.log("Malformed request line, invalid length");
                     clientSocket.end();
                     return;
                 }
 
-                var headerOptionMap = buildHeaderOptionMap(headerLines);
-                var requestType = requestLineComponents[0];
+                var requestType = requestLineComponents[0].toUpperCase();
                 var requestURI = requestLineComponents[1];
-                var requestVersion = requestLineComponents[2];
+                var requestVersion = requestLineComponents[2].toUpperCase();
 
-                var serverAddr;
-                if (!("host" in options)) {
-                    console.log("host not in options");
+                if (HTTP_METHODS.indexOf(requestType) == -1){
+                    // Malformed request.
+                    console.log("Malformed request line, method not valid");
                     clientSocket.end();
                     return;
                 }
+                if (requestVersion != "HTTP/1.1"){
+                    // We only support 1.1
+                    console.log("Unsupported version", requestVersion);
+                    clientSocket.end();
+                    return
+                }
 
+                logRequest(requestType, requestURI)
+
+                var optionMap = buildOptionMap(headerLines);
+
+                // Modify header fields
+                requestLineComponents[2] = "HTTP/1.0"
+                if ("connection" in optionMap) {
+                    optionMap["connection"] = "close";
+                }
+                if ("proxy-connection" in optionMap) {
+                    optionMap["proxy-connection"] = "close";
+                }
+
+
+                if (!("host" in optionMap)) {
+                    // All 1.1 messages should have a host field
+                    clientSocket.end();
+                    return;
+                }
                 // Could ipv6 cause there to be multiple : in host?
-                var hostFieldComponents = options.host.split(':');
+                var hostFieldComponents = optionMap.host.split(':');
 
                 var hostName = hostFieldComponents[0];
                 var hostPort = determineServerPort(hostFieldComponents, requestURI);
@@ -90,10 +101,10 @@ var server = net.createServer(function (clientSocket) {
                 function connectToServer(hostname, port) {
                     // Assign on msg based upon connection type Connect vs Get
                     // each callback should have a static definition (?)
-                    if (reqType == "connect") {
+                    if (requestType == "CONNECT") {
                         serverSocket.on("error", function() {
                             // send 502 bad gateway
-                            msg = "HTTP/1.1 502 Bad Gateway";
+                            var msg = "HTTP/1.1 502 Bad Gateway\r\n\r\n";
                             clientSocket.write(msg, function() {
                                 clientSocket.end();
                             });
@@ -103,19 +114,18 @@ var server = net.createServer(function (clientSocket) {
                                 clientSocket.end();
                             });
                             // send 200
-                            //TODO: build message
-                            msg = "HTTP/1.1 200 OK";
+                            var msg = "HTTP/1.1 200 OK\r\n\r\n";
                             clientSocket.write(msg);
                         });
-                    } else if(reqType == "get") {
+                    } else {
                         // forward modified header + data
                         serverSocket.on("connect", function() {
-                            modifiedHeader = buildHTTPHeader(requestLineComponents, optionMap);
-                            serverSocket.write(modifiedHeader);
+                            var modifiedHeader = buildHTTPHeader(requestLineComponents, optionMap);
+                            serverSocket.write(modifiedHeader + extraData);
                         });
                     }
                     // Connect to Host/Port
-                    serverSocket.connect(port, hostname);
+                    serverSocket.connect(hostPort, hostName);
                 }
                 dns.lookup(hostName, (err, address, family) => {
                     if (err) {
@@ -124,8 +134,7 @@ var server = net.createServer(function (clientSocket) {
                         clientSocket.end();
                         return;
                     }
-                    //console.log("lookup success:", address);
-                    connectToServer(address, port);
+                    connectToServer(address, hostPort);
                 });
             }
         } else {
@@ -144,17 +153,17 @@ server.on('error', (err) => {
 
 server.listen(clientFacingPort);
 
-function buildHeaderOptionMap(lines) {
+function buildOptionMap(lines) {
     var options = {};
     for (lineNum in lines) {
         var optionComponents = splitHeaderOptionString(lines[lineNum], ":");
 
         if (optionComponents == null) { continue; }
 
-        var optionKey = optionComponents[0].trim().toLowerCase();
-        var optionValue = optionComponents[1].trim();
+        var key = optionComponents[0].trim().toLowerCase();
+        var value = optionComponents[1].trim();
 
-        options[key] = optionValue;
+        options[key] = value;
     }
     return options;
 }
@@ -191,3 +200,10 @@ function determineServerPort(hostFieldComponents, requestURI) {
     }
     return serverPort;
 }
+
+function logRequest(method, uri) {
+    var time = new Date();
+    console.log(time + " >> " + method.toUpperCase() + " " + uri);
+};
+
+const HTTP_METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "TRACE", "CONNECT"];
