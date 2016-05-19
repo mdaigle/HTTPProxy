@@ -2,8 +2,6 @@ var net = require('net');
 var dns = require('dns');
 var date = new Date();
 
-//TODO: make sure CONNECT works
-
 var args = process.argv.slice(2);
 if (args.length != 1) {
     console.log("Incorrect number of arguments.");
@@ -42,10 +40,10 @@ var server = net.createServer(function (clientSocket) {
         if (!haveSeenEndOfHeader) {
             var dataString = data.toString('ascii');
             header += dataString;
-            if (header.includes('\r\n\r\n')) {
+            if (header.includes('\r\n\r\n') || header.includes('\n\n')) {
                 haveSeenEndOfHeader = true;
-                var trimmedHeader = header.split('\r\n\r\n');
-                var headerLines = trimmedHeader[0].split('\r\n');
+                var trimmedHeader = header.split(/(\r\n\r\n|\n\n)/);
+                var headerLines = trimmedHeader[0].split(/[\r]?\n/);
                 var extraData = trimmedHeader[1];
 
                 // Take the first line and split it on white space
@@ -78,7 +76,7 @@ var server = net.createServer(function (clientSocket) {
                 var optionMap = buildOptionMap(headerLines);
 
                 // Modify header fields
-                requestLineComponents[2] = "HTTP/1.0"
+                requestLineComponents[2] = "HTTP/1.1"
                 if ("connection" in optionMap) {
                     optionMap["connection"] = "close";
                 }
@@ -202,7 +200,7 @@ function determineServerPort(hostFieldComponents, requestURI) {
 
 function logRequest(method, uri) {
     var time = new Date();
-    console.log(time + " >> " + method.toUpperCase() + " " + uri);
+    console.log(time + " >>> " + method.toUpperCase() + " " + uri);
 };
 
 const HTTP_METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "TRACE", "CONNECT"];
